@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# janela-padrao: coloca uma janela numa área "padrão" (grande, com margem, centralizada).
+# Uso: janela-padrao [ID_DA_JANELA]   (sem argumento, usa a janela em foco)
+#
+# Configuração opcional em ~/.config/janela-padrao/config (veja o README):
+#   WIDTH_PCT=97 HEIGHT_PCT=89 TOP=51
+#   FIXED_GEOMETRY="x,y,largura,altura"   # área visível fixa, em pixels
+
+WIDTH_PCT=97     # largura, em % do monitor
+HEIGHT_PCT=89    # altura, em % do monitor
+TOP=51           # distância do topo do monitor (barra superior), em px
+FIXED_GEOMETRY=""
+
+CONF="${XDG_CONFIG_HOME:-$HOME/.config}/janela-padrao/config"
+[ -f "$CONF" ] && . "$CONF"
+
+id=${1:-$(xprop -root _NET_ACTIVE_WINDOW | grep -o '0x[0-9a-f]*')}
+{ [ -z "$id" ] || [ "$id" = 0x0 ]; } && exit 0
+
+# desfaz tela cheia / maximização e espera terminar
+if [ -z "$JANELA_PADRAO_DRY" ]; then
+  wmctrl -ir "$id" -b remove,fullscreen
+  wmctrl -ir "$id" -b remove,maximized_vert
+  wmctrl -ir "$id" -b remove,maximized_horz
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    xprop -id "$id" _NET_WM_STATE | grep -q MAXIMIZED || break
+    sleep 0.1
+  done
+fi
+
+if [ -n "$FIXED_GEOMETRY" ]; then
+  IFS=, read -r VX VY VW VH <<< "$FIXED_GEOMETRY"
+else
+  # monitor onde está o centro da janela (se não achar, usa o primeiro)
+  eval "$(xdotool getwindowgeometry --shell "$id")"   # X Y WIDTH HEIGHT
+  cx=$((X + WIDTH / 2)); cy=$((Y + HEIGHT / 2))
+  re='([0-9]+)/[0-9]+x([0-9]+)/[0-9]+\+([0-9]+)\+([0-9]+)'
+  mw=""; first=""
+  while read -r line; do
+    [[ $line =~ $re ]] || continue
+    w=${BASH_REMATCH[1]}; h=${BASH_REMATCH[2]}; x=${BASH_REMATCH[3]}; y=${BASH_REMATCH[4]}
+    [ -z "$first" ] && first="$w $h $x $y"
+    if [ "$cx" -ge "$x" ] && [ "$cx" -lt $((x + w)) ] && [ "$cy" -ge "$y" ] && [ "$cy" -lt $((y + h)) ]; then
+      mw=$w; mh=$h; mx=$x; my=$y; break
+    fi
+  done < <(xrandr --listmonitors | tail -n +2)
+  [ -z "$mw" ] && read -r mw mh mx my <<< "$first"
+  VW=$((mw * WIDTH_PCT / 100)); VH=$((mh * HEIGHT_PCT / 100))
+  VX=$((mx + (mw - VW) / 2));   VY=$((my + TOP))
+fi
+
+[ -n "$JANELA_PADRAO_DRY" ] && { echo "área visível: x=$VX y=$VY largura=$VW altura=$VH"; exit 0; }
+
+# a sombra das janelas (CSD) conta no tamanho: compensa para a parte visível ficar certa
+read -r L R T B < <(xprop -id "$id" _GTK_FRAME_EXTENTS 2>/dev/null | grep -o '[0-9]\+' | tr '\n' ' ')
+L=${L:-0}; R=${R:-0}; T=${T:-0}; B=${B:-0}
+wmctrl -ir "$id" -e 0,$((VX - L)),$((VY - T)),$((VW + L + R)),$((VH + T + B))

@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Super+Shift+duplo clique: a janela sob o cursor vai para o padrão.
+# O xbindkeys chama este script a cada clique; só age no 2º clique em < 0.5 s.
+f="${XDG_RUNTIME_DIR:-/tmp}/janela-padrao-click"
+now=$(date +%s%N); prev=$(cat "$f" 2>/dev/null || echo 0)
+if [ $(( (now - prev) / 1000000 )) -gt 500 ]; then echo "$now" > "$f"; exit 0; fi
+rm -f "$f"
+
+dir=$(dirname "$(readlink -f "$0")")
+eval "$(xdotool getmouselocation --shell)"   # define X e Y
+for id in $(xprop -root _NET_CLIENT_LIST_STACKING | grep -o '0x[0-9a-f]*' | tac); do
+  st=$(xprop -id "$id" _NET_WM_STATE _NET_WM_WINDOW_TYPE 2>/dev/null)
+  case "$st" in *HIDDEN*|*DESKTOP*|*DOCK*) continue ;; esac
+  eval "$(xdotool getwindowgeometry --shell "$id" 2>/dev/null | sed 's/^/W_/')"
+  if [ "$X" -ge "$W_X" ] && [ "$X" -lt $((W_X + W_WIDTH)) ] && [ "$Y" -ge "$W_Y" ] && [ "$Y" -lt $((W_Y + W_HEIGHT)) ]; then
+    exec "$dir/janela-padrao" "$id"
+  fi
+done
